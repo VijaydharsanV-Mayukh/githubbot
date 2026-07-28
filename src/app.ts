@@ -12,26 +12,14 @@ const app = express();
 app.use(cors());
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// Raw body parser middleware for /api/webhook/github signature verification
-app.use('/api/webhook/github', (req: RequestWithRawBody, res, next) => {
-  let data = '';
-  req.setEncoding('utf8');
-  req.on('data', (chunk) => {
-    data += chunk;
-  });
-  req.on('end', () => {
-    req.rawBody = Buffer.from(data);
-    try {
-      req.body = JSON.parse(data);
-    } catch {
-      req.body = {};
-    }
-    next();
-  });
-});
-
-// Standard JSON body parsing for other routes
-app.use(express.json());
+// Standard JSON body parsing with rawBody retention for HMAC & Ed25519 signature verifications
+app.use(
+  express.json({
+    verify: (req: RequestWithRawBody, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // Routes
 app.use('/', statusRouter);
