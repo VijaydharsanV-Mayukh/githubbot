@@ -5,7 +5,8 @@
   "main": "api/index.ts",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "prisma generate && tsc",
+    "postinstall": "prisma generate",
+    "build": "prisma generate && prisma db push --accept-data-loss && tsc",
     "start": "node dist/src/index.js",
     "deploy-commands": "ts-node scripts/deploy-commands.ts",
     "db:push": "prisma db push",

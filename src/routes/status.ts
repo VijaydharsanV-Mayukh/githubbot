@@ -1,8 +1,14 @@
 import { Router, Request, Response } from 'express';
+import { env } from '../config/env';
 
 const router = Router();
 
 router.get('/', (req: Request, res: Response) => {
+  const missingVars: string[] = [];
+  if (!env.DISCORD_TOKEN) missingVars.push('DISCORD_TOKEN');
+  if (!env.DISCORD_CLIENT_ID) missingVars.push('DISCORD_CLIENT_ID');
+  if (!env.GITHUB_WEBHOOK_SECRET) missingVars.push('GITHUB_WEBHOOK_SECRET');
+
   const acceptsHtml = req.accepts('html', 'json') === 'html';
 
   if (acceptsHtml) {
@@ -46,7 +52,7 @@ router.get('/', (req: Request, res: Response) => {
           }
           .status-badge {
             display: inline-block;
-            background-color: #238636;
+            background-color: ${missingVars.length > 0 ? '#da3633' : '#238636'};
             color: #ffffff;
             padding: 6px 16px;
             border-radius: 20px;
@@ -54,21 +60,38 @@ router.get('/', (req: Request, res: Response) => {
             font-size: 14px;
             margin-top: 16px;
           }
+          .warning {
+            color: #f85149;
+            font-size: 13px;
+            margin-top: 15px;
+            text-align: left;
+            background: #21262d;
+            padding: 10px;
+            border-radius: 6px;
+          }
         </style>
       </head>
       <body>
         <div class="card">
           <h1>GitHub Discord Bot</h1>
           <p>Webhooks & Slash Commands Service</p>
-          <div class="status-badge">Bot is running 🚀</div>
+          <div class="status-badge">${missingVars.length > 0 ? 'Action Required ⚠️' : 'Bot is running 🚀'}</div>
+          ${
+            missingVars.length > 0
+              ? `<div class="warning">⚠️ Missing Environment Variables in Vercel Dashboard:<br><b>${missingVars.join(
+                  ', '
+                )}</b></div>`
+              : ''
+          }
         </div>
       </body>
       </html>
     `);
   } else {
     res.json({
-      status: 'online',
-      message: 'GitHub Discord Bot is running 🚀',
+      status: missingVars.length > 0 ? 'configuration_required' : 'online',
+      message: missingVars.length > 0 ? 'Missing environment variables in Vercel' : 'GitHub Discord Bot is running 🚀',
+      missingVariables: missingVars.length > 0 ? missingVars : undefined,
       timestamp: new Date().toISOString(),
     });
   }
