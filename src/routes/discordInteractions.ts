@@ -45,27 +45,32 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
         const repo = getOption('repository');
         const channelId = getOption('channel');
 
-        await MappingService.addMapping(guildId, repo, channelId);
-
+        // Respond instantly to Discord HTTP request
         res.json({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
             content: `✅ Mapped repository **${repo}** to channel <#${channelId}>!`,
           },
         });
+
+        // Persist mapping asynchronously
+        MappingService.addMapping(guildId, repo, channelId).catch((err) => {
+          console.error(`❌ Failed to save mapping for ${repo}:`, err);
+        });
         return;
       }
 
       if (subName === 'remove') {
         const repo = getOption('repository');
-        const removed = await MappingService.removeMapping(guildId, repo);
+
+        MappingService.removeMapping(guildId, repo).then((removed) => {
+          console.log(`Removed mapping for ${repo}: ${removed}`);
+        });
 
         res.json({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: removed
-              ? `✅ Removed mapping for repository **${repo}**.`
-              : `⚠️ Mapping for **${repo}** was not found.`,
+            content: `✅ Removed mapping for repository **${repo}**.`,
           },
         });
         return;
@@ -75,13 +80,15 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
         const repo = getOption('repository');
         const channelId = getOption('channel');
 
-        await MappingService.addMapping(guildId, repo, channelId);
-
         res.json({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
             content: `✏️ Updated mapping for repository **${repo}** to channel <#${channelId}>!`,
           },
+        });
+
+        MappingService.addMapping(guildId, repo, channelId).catch((err) => {
+          console.error(`❌ Failed to edit mapping for ${repo}:`, err);
         });
         return;
       }
@@ -127,7 +134,13 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
           return;
         }
 
-        // Send test notification
+        // Respond instantly to Discord
+        res.json({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { content: `🧪 Sending test notification for repository **${repo}**...` },
+        });
+
+        // Send test notification asynchronously
         const fakePushPayload = {
           ref: 'refs/heads/main',
           commits: [
@@ -160,13 +173,8 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
 
         const embed = EmbedService.createPushEmbed(fakePushPayload);
         for (const m of mappings) {
-          await DiscordService.sendEmbed(m.channelId, [embed]);
+          DiscordService.sendEmbed(m.channelId, [embed]).catch(console.error);
         }
-
-        res.json({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: { content: `🧪 Test notification sent for repository **${repo}**!` },
-        });
         return;
       }
     }

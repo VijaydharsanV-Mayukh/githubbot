@@ -1,9 +1,13 @@
 import app from './app';
 import { env } from './config/env';
 import { MappingService } from './services/mapping.service';
+import { initDiscordClient } from './discord';
 
 async function bootstrap() {
   await MappingService.warmCache();
+
+  // Initialize Discord Gateway Client for instant local slash command response
+  await initDiscordClient();
 
   app.listen(env.PORT, () => {
     console.log(`\n==============================================`);
