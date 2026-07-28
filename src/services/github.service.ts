@@ -1,6 +1,8 @@
 import { EmbedService } from './embed.service';
 import { MappingService } from './mapping.service';
 import { DiscordService } from './discord.service';
+import { EmbedBuilder } from 'discord.js';
+import { Colors } from '../utils/colors';
 
 export class GitHubService {
   /**
@@ -8,6 +10,31 @@ export class GitHubService {
    */
   public static async processWebhook(eventType: string, payload: any): Promise<{ success: boolean; channelsNotified: number }> {
     const repoName = payload.repository?.full_name || payload.repository?.name;
+
+    // Special handling for GitHub PING test event
+    if (eventType === 'ping') {
+      console.log(`🏓 Received GitHub ping event for repository: ${repoName || 'N/A'}`);
+      if (repoName) {
+        const mappings = await MappingService.getMappingsForRepo(repoName);
+        if (mappings && mappings.length > 0) {
+          const pingEmbed = new EmbedBuilder()
+            .setColor(Colors.Push)
+            .setTitle(`🏓 GitHub Webhook Connected Successfully!`)
+            .setURL(payload.repository?.html_url || 'https://github.com')
+            .setDescription(`**Zen Quote:** *"${payload.zen || 'Design for failure.'}"*\n\nWebhook integration for **[${repoName}](${payload.repository?.html_url})** is active and listening for events.`)
+            .setTimestamp();
+
+          let count = 0;
+          for (const m of mappings) {
+            const sent = await DiscordService.sendEmbed(m.channelId, [pingEmbed]);
+            if (sent) count++;
+          }
+          return { success: true, channelsNotified: count };
+        }
+      }
+      return { success: true, channelsNotified: 0 };
+    }
+
     if (!repoName) {
       console.log(`⚠️ Received GitHub webhook ${eventType} without repository info`);
       return { success: false, channelsNotified: 0 };
