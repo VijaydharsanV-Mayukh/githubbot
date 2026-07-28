@@ -1,5 +1,6 @@
 import { db } from '../database/prisma';
 import { normalizeRepoName } from '../utils/helpers';
+import { randomUUID } from 'crypto';
 
 export interface RepositoryMappingRecord {
   id: string;
@@ -9,7 +10,7 @@ export interface RepositoryMappingRecord {
 }
 
 function generateId(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 export class MappingService {
@@ -22,10 +23,10 @@ export class MappingService {
       this.cache.clear();
       for (const row of result.rows) {
         const record: RepositoryMappingRecord = {
-          id: row.id as string,
-          guildId: row.guildId as string,
-          repositoryName: row.repositoryName as string,
-          channelId: row.channelId as string,
+          id: String(row.id),
+          guildId: String(row.guildId),
+          repositoryName: String(row.repositoryName),
+          channelId: String(row.channelId),
         };
         const repoKey = normalizeRepoName(record.repositoryName);
         const existing = this.cache.get(repoKey) || [];
@@ -52,10 +53,10 @@ export class MappingService {
         [key]
       );
       const records: RepositoryMappingRecord[] = result.rows.map((row) => ({
-        id: row.id as string,
-        guildId: row.guildId as string,
-        repositoryName: row.repositoryName as string,
-        channelId: row.channelId as string,
+        id: String(row.id),
+        guildId: String(row.guildId),
+        repositoryName: String(row.repositoryName),
+        channelId: String(row.channelId),
       }));
       this.cache.set(key, records);
       return records;
@@ -67,13 +68,14 @@ export class MappingService {
 
   public static async addMapping(guildId: string, repoName: string, channelId: string, guildName?: string): Promise<RepositoryMappingRecord> {
     const normalizedRepo = normalizeRepoName(repoName);
+    const now = new Date().toISOString();
 
     // Upsert guild
     const existingGuild = await db.execute('SELECT id FROM Guild WHERE guildId = ?', [guildId]);
     if (existingGuild.rows.length === 0) {
       await db.execute(
-        'INSERT INTO Guild (id, guildId, name, createdAt) VALUES (?, ?, ?, datetime("now"))',
-        [generateId(), guildId, guildName || null]
+        'INSERT INTO Guild (id, guildId, name, createdAt) VALUES (?, ?, ?, ?)',
+        [generateId(), guildId, guildName || null, now]
       );
     }
 
@@ -85,16 +87,16 @@ export class MappingService {
 
     let mappingId: string;
     if (existingMapping.rows.length > 0) {
-      mappingId = existingMapping.rows[0].id as string;
+      mappingId = String(existingMapping.rows[0].id);
       await db.execute(
-        'UPDATE RepositoryMapping SET channelId = ?, updatedAt = datetime("now") WHERE id = ?',
-        [channelId, mappingId]
+        'UPDATE RepositoryMapping SET channelId = ?, updatedAt = ? WHERE id = ?',
+        [channelId, now, mappingId]
       );
     } else {
       mappingId = generateId();
       await db.execute(
-        'INSERT INTO RepositoryMapping (id, guildId, repositoryName, channelId, createdAt, updatedAt) VALUES (?, ?, ?, ?, datetime("now"), datetime("now"))',
-        [mappingId, guildId, normalizedRepo, channelId]
+        'INSERT INTO RepositoryMapping (id, guildId, repositoryName, channelId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+        [mappingId, guildId, normalizedRepo, channelId, now, now]
       );
     }
 
@@ -133,10 +135,10 @@ export class MappingService {
         [guildId]
       );
       return result.rows.map((row) => ({
-        id: row.id as string,
-        guildId: row.guildId as string,
-        repositoryName: row.repositoryName as string,
-        channelId: row.channelId as string,
+        id: String(row.id),
+        guildId: String(row.guildId),
+        repositoryName: String(row.repositoryName),
+        channelId: String(row.channelId),
       }));
     } catch (error) {
       console.error(`❌ Error listing mappings for guild ${guildId}:`, error);

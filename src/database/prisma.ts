@@ -27,7 +27,8 @@ export const db = {
     return getClient();
   },
 
-  async execute(sql: string, args?: any[]) {
-    return getClient().execute({ sql, args: args || [] });
+  async execute(sql: string, args: any[] = []) {
+    const cleanArgs = args.map((arg) => (arg === undefined ? null : arg));
+    return getClient().execute({ sql, args: cleanArgs });
   },
 };
