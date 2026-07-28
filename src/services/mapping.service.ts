@@ -1,4 +1,4 @@
-import { prisma } from '../database/prisma';
+import { db } from '../database/prisma';
 import { normalizeRepoName } from '../utils/helpers';
 
 export interface RepositoryMappingRecord {
@@ -8,34 +8,37 @@ export interface RepositoryMappingRecord {
   channelId: string;
 }
 
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
 export class MappingService {
-  // In-memory mapping cache for zero-latency lookup
   private static cache: Map<string, RepositoryMappingRecord[]> = new Map();
   private static isCacheWarmed = false;
 
-  /**
-   * Pre-warms cache with all database mappings
-   */
   public static async warmCache(): Promise<void> {
     try {
-      const allMappings = await prisma.repositoryMapping.findMany();
+      const result = await db.execute('SELECT id, guildId, repositoryName, channelId FROM RepositoryMapping');
       this.cache.clear();
-      for (const m of allMappings) {
-        const repoKey = normalizeRepoName(m.repositoryName);
+      for (const row of result.rows) {
+        const record: RepositoryMappingRecord = {
+          id: row.id as string,
+          guildId: row.guildId as string,
+          repositoryName: row.repositoryName as string,
+          channelId: row.channelId as string,
+        };
+        const repoKey = normalizeRepoName(record.repositoryName);
         const existing = this.cache.get(repoKey) || [];
-        existing.push(m);
+        existing.push(record);
         this.cache.set(repoKey, existing);
       }
       this.isCacheWarmed = true;
-      console.log(`📦 Mapping cache pre-warmed with ${allMappings.length} record(s).`);
+      console.log(`📦 Mapping cache pre-warmed with ${result.rows.length} record(s).`);
     } catch (error) {
       console.error('⚠️ Could not warm cache from database:', error);
     }
   }
 
-  /**
-   * Finds all channel mappings for a given repository
-   */
   public static async getMappingsForRepo(repoName: string): Promise<RepositoryMappingRecord[]> {
     const key = normalizeRepoName(repoName);
 
@@ -44,14 +47,16 @@ export class MappingService {
     }
 
     try {
-      const records = await prisma.repositoryMapping.findMany({
-        where: {
-          repositoryName: {
-            equals: key,
-          },
-        },
-      });
-
+      const result = await db.execute(
+        'SELECT id, guildId, repositoryName, channelId FROM RepositoryMapping WHERE LOWER(repositoryName) = ?',
+        [key]
+      );
+      const records: RepositoryMappingRecord[] = result.rows.map((row) => ({
+        id: row.id as string,
+        guildId: row.guildId as string,
+        repositoryName: row.repositoryName as string,
+        channelId: row.channelId as string,
+      }));
       this.cache.set(key, records);
       return records;
     } catch (error) {
@@ -60,58 +65,58 @@ export class MappingService {
     }
   }
 
-  /**
-   * Adds or updates a repository mapping
-   */
   public static async addMapping(guildId: string, repoName: string, channelId: string, guildName?: string): Promise<RepositoryMappingRecord> {
     const normalizedRepo = normalizeRepoName(repoName);
 
-    // Ensure guild exists
-    await prisma.guild.upsert({
-      where: { guildId },
-      update: { name: guildName },
-      create: { guildId, name: guildName },
-    });
+    // Upsert guild
+    const existingGuild = await db.execute('SELECT id FROM Guild WHERE guildId = ?', [guildId]);
+    if (existingGuild.rows.length === 0) {
+      await db.execute(
+        'INSERT INTO Guild (id, guildId, name, createdAt) VALUES (?, ?, ?, datetime("now"))',
+        [generateId(), guildId, guildName || null]
+      );
+    }
 
-    // Create or update mapping
-    const mapping = await prisma.repositoryMapping.upsert({
-      where: {
-        guildId_repositoryName: {
-          guildId,
-          repositoryName: normalizedRepo,
-        },
-      },
-      update: {
-        channelId,
-      },
-      create: {
-        guildId,
-        repositoryName: normalizedRepo,
-        channelId,
-      },
-    });
+    // Upsert mapping
+    const existingMapping = await db.execute(
+      'SELECT id FROM RepositoryMapping WHERE guildId = ? AND repositoryName = ?',
+      [guildId, normalizedRepo]
+    );
 
-    // Invalidate cache
+    let mappingId: string;
+    if (existingMapping.rows.length > 0) {
+      mappingId = existingMapping.rows[0].id as string;
+      await db.execute(
+        'UPDATE RepositoryMapping SET channelId = ?, updatedAt = datetime("now") WHERE id = ?',
+        [channelId, mappingId]
+      );
+    } else {
+      mappingId = generateId();
+      await db.execute(
+        'INSERT INTO RepositoryMapping (id, guildId, repositoryName, channelId, createdAt, updatedAt) VALUES (?, ?, ?, ?, datetime("now"), datetime("now"))',
+        [mappingId, guildId, normalizedRepo, channelId]
+      );
+    }
+
     await this.warmCache();
 
-    return mapping;
+    return { id: mappingId, guildId, repositoryName: normalizedRepo, channelId };
   }
 
-  /**
-   * Removes a repository mapping
-   */
   public static async removeMapping(guildId: string, repoName: string): Promise<boolean> {
     const normalizedRepo = normalizeRepoName(repoName);
 
     try {
-      await prisma.repositoryMapping.delete({
-        where: {
-          guildId_repositoryName: {
-            guildId,
-            repositoryName: normalizedRepo,
-          },
-        },
-      });
+      const existing = await db.execute(
+        'SELECT id FROM RepositoryMapping WHERE guildId = ? AND repositoryName = ?',
+        [guildId, normalizedRepo]
+      );
+      if (existing.rows.length === 0) return false;
+
+      await db.execute(
+        'DELETE FROM RepositoryMapping WHERE guildId = ? AND repositoryName = ?',
+        [guildId, normalizedRepo]
+      );
 
       await this.warmCache();
       return true;
@@ -121,15 +126,18 @@ export class MappingService {
     }
   }
 
-  /**
-   * Lists all mappings for a specific guild
-   */
   public static async listGuildMappings(guildId: string): Promise<RepositoryMappingRecord[]> {
     try {
-      return await prisma.repositoryMapping.findMany({
-        where: { guildId },
-        orderBy: { createdAt: 'desc' },
-      });
+      const result = await db.execute(
+        'SELECT id, guildId, repositoryName, channelId FROM RepositoryMapping WHERE guildId = ? ORDER BY createdAt DESC',
+        [guildId]
+      );
+      return result.rows.map((row) => ({
+        id: row.id as string,
+        guildId: row.guildId as string,
+        repositoryName: row.repositoryName as string,
+        channelId: row.channelId as string,
+      }));
     } catch (error) {
       console.error(`❌ Error listing mappings for guild ${guildId}:`, error);
       return [];
