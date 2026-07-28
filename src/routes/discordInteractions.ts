@@ -45,34 +45,49 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
         const repo = getOption('repository');
         const channelId = getOption('channel');
 
-        // Respond instantly to Discord HTTP request
-        res.json({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `✅ Mapped repository **${repo}** to channel <#${channelId}>!`,
-          },
-        });
+        try {
+          // Await database write to guarantee data persistence
+          await MappingService.addMapping(guildId, repo, channelId);
+          console.log(`✅ Saved mapping: repo=${repo}, channel=${channelId}, guild=${guildId}`);
 
-        // Persist mapping asynchronously
-        MappingService.addMapping(guildId, repo, channelId).catch((err) => {
-          console.error(`❌ Failed to save mapping for ${repo}:`, err);
-        });
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: `✅ Mapped repository **${repo}** to channel <#${channelId}>!`,
+            },
+          });
+        } catch (err: any) {
+          console.error(`❌ Error saving mapping for ${repo}:`, err);
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: `❌ Failed to save repository mapping: ${err.message || err}`,
+            },
+          });
+        }
         return;
       }
 
       if (subName === 'remove') {
         const repo = getOption('repository');
 
-        MappingService.removeMapping(guildId, repo).then((removed) => {
-          console.log(`Removed mapping for ${repo}: ${removed}`);
-        });
-
-        res.json({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `✅ Removed mapping for repository **${repo}**.`,
-          },
-        });
+        try {
+          const removed = await MappingService.removeMapping(guildId, repo);
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: removed
+                ? `✅ Removed mapping for repository **${repo}**.`
+                : `⚠️ Mapping for **${repo}** was not found.`,
+            },
+          });
+        } catch (err: any) {
+          console.error(`❌ Error removing mapping for ${repo}:`, err);
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: { content: `❌ Error removing mapping: ${err.message || err}` },
+          });
+        }
         return;
       }
 
@@ -80,45 +95,58 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
         const repo = getOption('repository');
         const channelId = getOption('channel');
 
-        res.json({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `✏️ Updated mapping for repository **${repo}** to channel <#${channelId}>!`,
-          },
-        });
-
-        MappingService.addMapping(guildId, repo, channelId).catch((err) => {
-          console.error(`❌ Failed to edit mapping for ${repo}:`, err);
-        });
+        try {
+          await MappingService.addMapping(guildId, repo, channelId);
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: `✏️ Updated mapping for repository **${repo}** to channel <#${channelId}>!`,
+            },
+          });
+        } catch (err: any) {
+          console.error(`❌ Error editing mapping for ${repo}:`, err);
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: { content: `❌ Error updating mapping: ${err.message || err}` },
+          });
+        }
         return;
       }
 
       if (subName === 'list') {
-        const mappings = await MappingService.listGuildMappings(guildId);
+        try {
+          const mappings = await MappingService.listGuildMappings(guildId);
 
-        if (mappings.length === 0) {
+          if (mappings.length === 0) {
+            res.json({
+              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+              data: { content: 'ℹ️ No repository mappings configured for this server yet. Use `/repo add` to add one!' },
+            });
+            return;
+          }
+
+          const lines = mappings.map((m) => `• **${m.repositoryName}** ➔ <#${m.channelId}>`).join('\n');
+
           res.json({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: { content: 'ℹ️ No repository mappings configured for this server yet. Use `/repo add` to add one!' },
+            data: {
+              embeds: [
+                {
+                  title: '📋 Configured Repository Mappings',
+                  description: lines,
+                  color: 0x0969da,
+                  footer: { text: `Total: ${mappings.length} mapping(s)` },
+                },
+              ],
+            },
           });
-          return;
+        } catch (err: any) {
+          console.error(`❌ Error listing mappings:`, err);
+          res.json({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: { content: `❌ Error loading mappings: ${err.message || err}` },
+          });
         }
-
-        const lines = mappings.map((m) => `• **${m.repositoryName}** ➔ <#${m.channelId}>`).join('\n');
-
-        res.json({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            embeds: [
-              {
-                title: '📋 Configured Repository Mappings',
-                description: lines,
-                color: 0x0969da,
-                footer: { text: `Total: ${mappings.length} mapping(s)` },
-              },
-            ],
-          },
-        });
         return;
       }
 
@@ -134,7 +162,7 @@ router.post('/interactions', verifyDiscordKey, async (req: Request, res: Respons
           return;
         }
 
-        // Respond instantly to Discord
+        // Respond to Discord
         res.json({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: { content: `🧪 Sending test notification for repository **${repo}**...` },
